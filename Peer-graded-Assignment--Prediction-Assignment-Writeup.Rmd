@@ -1,0 +1,193 @@
+---
+title: 'Peer-graded Assignment: Prediction Assignment Writeup'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Overview
+
+### Summary
+
+By this research we will test three models: Recursive Partitioning, Gradient Boosting Machine and Random Forest on the data, collected from devices such as Jawbone Up, Nike FuelBand, and Fitbit.
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+### Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+# Getting the data
+
+### Loading required packages
+
+```{r library, message=FALSE, warning=FALSE}
+library(caret)
+library(ggplot2)
+library(fscaret)
+library(randomForest)
+library(e1071)
+library(rattle)
+```
+
+### Downloading data
+
+```{r data}
+train_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+train_data <- read.csv(url(train_url), strip.white = TRUE, na.strings = c("NA", ""))
+test_data <- read.csv(url(test_url), strip.white = TRUE, na.strings = c("NA", ""))
+
+dim(train_data)
+dim(test_data)
+```
+
+We have 19 622 observations in train data and 20 observations in test data.
+
+Also we need to set a seed to make the research reproducible.
+
+```{r set_seed}
+set.seed(55555)
+```
+
+### Cleaning the data
+
+There are three revealed issues of the current data:
+
+* NA values
+
+* near-zero variance predictors
+
+* data, which unfits for prediction
+
+
+First of all, there are many variables with NA values, which we cannot use as predictors, therefore, it is better to remove them from the dataset.
+
+```{r remove_NA}
+train_data <- train_data[, colSums(is.na(train_data)) == 0]
+```
+
+The next step is removing near-zero variance predictors. As soon as, we have some columns with the same data across the rows, which will not make any impact to the analysis, we need to drop them from the dataset.
+
+```{r remove_NZV}
+nzv <- nearZeroVar(train_data)
+train_data <- train_data[, -nzv]
+```
+
+Finally, five columns, namely "X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", unfit for prediction model and should be removed before analysis.
+
+```{r drop_column}
+train_data <- train_data[, -c(1:5)]
+```
+
+### Splitting the data
+
+By the next step we will split the data to the training set and testing set.
+
+```{r split}
+in_train <- createDataPartition(y=train_data$classe, p=0.7, list = FALSE)
+train <- train_data[in_train, ]
+test <- train_data[-in_train, ]
+```
+
+# Choosing the model
+
+We will run three models to find the model with the best accuracy.
+
+### Recursive Partitioning
+
+Firstly, we will try the method of recursive partitioning.
+
+```{r rpart}
+model_rpart <- train(classe ~ ., data = train, method = "rpart")
+pred_rpart<- predict(model_rpart, test)
+confusionMatrix(pred_rpart, as.factor(test$classe))
+```
+
+As we can see, the accuracy of this model is lower, that 50%. Recursive partitioning is binary, and our data is not appropriate for this type of clusterization. Therefore, it is not possible to use the recursive partitioning model for our data.
+
+
+### Gradient Boosting Machine
+
+By the next step we will try to fit the model by Gradient Boosting Machine. This method requires the tuning of parameters to increase the accuracy, although, too many interactions can significantly decrease speed of the process. Firstly, we will try to run the model on 5 repeats.
+
+```{r gbm_0}
+fit_control_start <- trainControl(method = "repeatedcv",
+                            number = 3,
+                            repeats = 3)
+
+model_gbm_start <- train(classe ~ ., 
+                         data = train, 
+                         method = "gbm", 
+                         trControl = fit_control_start,
+                         verbose = FALSE)
+
+pred_gbm_start <- predict(model_gbm_start, test)
+confusionMatrix(pred_gbm_start, as.factor(test$classe))
+```
+
+The model is extremely slow and shows the accuracy about 98.9%, which is quite high. Although, we will try to reduce repeats, so we can increase the speed of the model.
+
+```{r gbm}
+fit_control <- trainControl(method = "repeatedcv",
+                            number = 3,
+                            repeats = 3)
+
+model_gbm <- train(classe ~ ., 
+                   data = train, 
+                   method = "gbm", 
+                   trControl = fit_control,
+                   verbose = FALSE)
+
+pred_gbm <- predict(model_gbm, test)
+confusionMatrix(pred_gbm, as.factor(test$classe))
+```
+
+The speed of the model significantly increased, and accuracy is quite high (equal to 99.6%), therefore, it is appropriate to use this model.
+
+### Random Forest
+
+We already got a good accuracy by GBM, but let us try random forest model with the same number of interactions.
+
+```{r random_forest}
+model_rf <- train(classe ~., 
+                  method = "rf", 
+                  data = train, 
+                  verbose = TRUE, 
+                  trControl = trainControl(method="cv"), 
+                  number = 3)
+pred_rf <- predict(model_rf, test)
+confusionMatrix(pred_rf, as.factor(test$classe))
+```
+
+Although Random Forest and Gradient Boosting Machine have a little bit different algorithm, we got the same accuracy (99.6%).
+
+# Testing the model
+
+Now we will apply both Gradient Boosting Machine and Random Forest models on out test data.
+Firstly, we will apply GBM model.
+
+```{r gbm_predict}
+pred_valid_gbm <- predict(model_gbm, test_data)
+pred_valid_gbm
+```
+
+Next, we will apply Random Forest model on our test data
+
+```{r rf_predict}
+pred_valid_rf <- predict(model_rf, test_data)
+pred_valid_rf
+```
+
+We got same predictions by these two models, the results of the predictions are presented above.
